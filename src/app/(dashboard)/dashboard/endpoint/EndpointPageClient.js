@@ -32,6 +32,7 @@ const RESET_INTERVAL_OPTIONS = [
   { value: "7d", label: "Every 7 Days (7d)" },
   { value: "14d", label: "Every 14 Days (14d)" },
   { value: "30d", label: "Every 30 Days (30d)" },
+  { value: "custom", label: "Custom Interval..." },
 ];
 
 export default function APIPageClient({ machineId }) {
@@ -41,11 +42,13 @@ export default function APIPageClient({ machineId }) {
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyLimit, setNewKeyLimit] = useState("");
   const [newKeyReset, setNewKeyReset] = useState("never");
+  const [newKeyCustomReset, setNewKeyCustomReset] = useState("");
   const [newKeyAllowedModels, setNewKeyAllowedModels] = useState("*");
   const [editingKey, setEditingKey] = useState(null);
   const [editName, setEditName] = useState("");
   const [editLimit, setEditLimit] = useState("");
   const [editReset, setEditReset] = useState("never");
+  const [editCustomReset, setEditCustomReset] = useState("");
   const [editAllowedModels, setEditAllowedModels] = useState("*");
   const [activeProviders, setActiveProviders] = useState([]);
   const [modelAliases, setModelAliases] = useState({});
@@ -713,14 +716,20 @@ export default function APIPageClient({ machineId }) {
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
 
+    const limitNum = newKeyLimit ? Number(newKeyLimit) : 0;
+    let finalReset = "never";
+    if (limitNum > 0) {
+      finalReset = newKeyReset === "custom" ? (newKeyCustomReset.trim() || "never") : newKeyReset;
+    }
+
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newKeyName,
-          tokenLimit: newKeyLimit ? Number(newKeyLimit) : 0,
-          resetInterval: newKeyReset,
+          tokenLimit: limitNum,
+          resetInterval: finalReset,
           allowedModels: newKeyAllowedModels.trim() || "*",
         }),
       });
@@ -732,6 +741,7 @@ export default function APIPageClient({ machineId }) {
         setNewKeyName("");
         setNewKeyLimit("");
         setNewKeyReset("never");
+        setNewKeyCustomReset("");
         setNewKeyAllowedModels("*");
         setShowAddModal(false);
       }
@@ -1169,7 +1179,7 @@ export default function APIPageClient({ machineId }) {
                     <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
                       Usage: {formatTokensNumber(key.usedTokens)} / {key.tokenLimit > 0 ? formatTokensNumber(key.tokenLimit) + " tokens" : "Unlimited"}
                     </span>
-                    {key.resetInterval && key.resetInterval !== "never" && (
+                    {key.tokenLimit > 0 && key.resetInterval && key.resetInterval !== "never" && (
                       <span className="text-xs px-2 py-0.5 rounded bg-gray-500/10 text-text-muted">
                         Reset: every {key.resetInterval}
                       </span>
@@ -1192,8 +1202,16 @@ export default function APIPageClient({ machineId }) {
                     onClick={() => {
                       setEditingKey(key);
                       setEditName(key.name || "");
-                      setEditLimit(key.tokenLimit ? String(key.tokenLimit) : "");
-                      setEditReset(key.resetInterval || "never");
+                      const lim = key.tokenLimit ? String(key.tokenLimit) : "";
+                      setEditLimit(lim);
+                      const resVal = key.resetInterval || "never";
+                      if (["never", "5h", "7d", "14d", "30d"].includes(resVal)) {
+                        setEditReset(resVal);
+                        setEditCustomReset("");
+                      } else {
+                        setEditReset("custom");
+                        setEditCustomReset(resVal);
+                      }
                       setEditAllowedModels(key.allowedModels || "*");
                     }}
                     className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
@@ -1263,12 +1281,22 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyLimit(e.target.value)}
             placeholder="e.g. 88000000"
           />
-          <Select
-            label="Auto Reset Interval"
-            options={RESET_INTERVAL_OPTIONS}
-            value={newKeyReset}
-            onChange={(e) => setNewKeyReset(e.target.value)}
-          />
+          {Number(newKeyLimit) > 0 && (
+            <Select
+              label="Auto Reset Interval"
+              options={RESET_INTERVAL_OPTIONS}
+              value={newKeyReset}
+              onChange={(e) => setNewKeyReset(e.target.value)}
+            />
+          )}
+          {Number(newKeyLimit) > 0 && newKeyReset === "custom" && (
+            <Input
+              label="Custom Interval (e.g. 10h, 3d)"
+              value={newKeyCustomReset}
+              onChange={(e) => setNewKeyCustomReset(e.target.value)}
+              placeholder="10h"
+            />
+          )}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-text-main">
@@ -1350,12 +1378,22 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setEditLimit(e.target.value)}
             placeholder="e.g. 88000000"
           />
-          <Select
-            label="Auto Reset Interval"
-            options={RESET_INTERVAL_OPTIONS}
-            value={editReset}
-            onChange={(e) => setEditReset(e.target.value)}
-          />
+          {Number(editLimit) > 0 && (
+            <Select
+              label="Auto Reset Interval"
+              options={RESET_INTERVAL_OPTIONS}
+              value={editReset}
+              onChange={(e) => setEditReset(e.target.value)}
+            />
+          )}
+          {Number(editLimit) > 0 && editReset === "custom" && (
+            <Input
+              label="Custom Interval (e.g. 10h, 3d)"
+              value={editCustomReset}
+              onChange={(e) => setEditCustomReset(e.target.value)}
+              placeholder="10h"
+            />
+          )}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-text-main">
@@ -1403,10 +1441,15 @@ export default function APIPageClient({ machineId }) {
             <Button
               onClick={() => {
                 if (!editingKey) return;
+                const limitNum = editLimit ? Number(editLimit) : 0;
+                let finalReset = "never";
+                if (limitNum > 0) {
+                  finalReset = editReset === "custom" ? (editCustomReset.trim() || "never") : editReset;
+                }
                 handleUpdateKeyQuota(editingKey.id, {
                   name: editName.trim() || editingKey.name,
-                  tokenLimit: editLimit ? Number(editLimit) : 0,
-                  resetInterval: editReset,
+                  tokenLimit: limitNum,
+                  resetInterval: finalReset,
                   allowedModels: editAllowedModels.trim() || "*",
                 });
               }}

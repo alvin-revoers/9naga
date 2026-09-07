@@ -128,10 +128,12 @@ export async function validateApiKey(key, requestedModel = null) {
     if (isNaN(lastResetMs)) lastResetMs = nowMs;
 
     let shouldReset = false;
-    if (resetInterval && resetInterval !== "never") {
+    if (tokenLimit > 0 && resetInterval && resetInterval !== "never") {
       let intervalMs = 0;
       const num = parseInt(resetInterval, 10);
-      if (resetInterval.endsWith("h")) {
+      if (resetInterval.endsWith("m")) {
+        intervalMs = num * 60 * 1000;
+      } else if (resetInterval.endsWith("h")) {
         intervalMs = num * 60 * 60 * 1000;
       } else if (resetInterval.endsWith("d")) {
         intervalMs = num * 24 * 60 * 60 * 1000;
