@@ -294,6 +294,9 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         redirectUri = "http://localhost:1455/auth/callback";
       } else if (provider === "xai") {
         redirectUri = "http://127.0.0.1:56121/callback";
+      } else if (provider === "antigravity" || provider === "gemini-cli") {
+        // Google Client ID is registered only with localhost redirect_uri
+        redirectUri = `http://localhost:${appPort}/callback`;
       } else {
         redirectUri = `${window.location.origin}/callback`;
       }
@@ -376,8 +379,12 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         if (!popupRef.current) {
           setStep("input");
         }
+      } else if (!isLocalhost && (provider === "antigravity" || provider === "gemini-cli")) {
+        // Remote host with Google OAuth (Antigravity/Gemini): show manual copy-paste instructions
+        setStep("input");
+        window.open(data.authUrl, "_blank");
       } else {
-        // Automatically open popup for all standard web OAuth flows (Antigravity, Gemini, Claude, etc.)
+        // Localhost (or standard providers): Open popup and wait for message
         setStep("waiting");
         popupRef.current = window.open(data.authUrl, "oauth_popup", "width=600,height=700");
         if (!popupRef.current) {
@@ -388,7 +395,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       setError(err.message);
       setStep("error");
     }
-  }, [provider, startPolling, oauthMeta, idcConfig, authMode, startProxyFlow]);
+  }, [provider, isLocalhost, startPolling, oauthMeta, idcConfig, authMode, startProxyFlow]);
 
   // Reset state and start OAuth when modal opens
   useEffect(() => {
