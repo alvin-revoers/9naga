@@ -324,7 +324,6 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
           <span className="material-symbols-outlined text-[18px]">volunteer_activism</span>
           <span className="hidden sm:inline">Donate</span>
         </button>
-        <ThemeToggle />
         <HeaderMenu onLogout={handleLogout} />
       </div>
       <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
