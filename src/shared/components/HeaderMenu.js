@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
-import { useTheme } from "@/shared/hooks/useTheme";
 import ChangelogModal from "./ChangelogModal";
 import { ConfirmModal } from "./Modal";
 
@@ -83,11 +82,6 @@ export default function HeaderMenu({ onLogout }) {
               icon="history"
               label="Change Log"
               onClick={() => { close(); setChangelogOpen(true); }}
-            />
-            <MenuItem
-              icon={isDark ? "light_mode" : "dark_mode"}
-              label="Theme"
-              onClick={() => { toggleTheme(); close(); }}
             />
             <MenuItem
               icon="power_settings_new"
