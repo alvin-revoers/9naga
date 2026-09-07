@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Select, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Select, Modal, CardSkeleton, Toggle, ConfirmModal, ModelSelectModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   TUNNEL_BENEFITS,
@@ -47,6 +47,10 @@ export default function APIPageClient({ machineId }) {
   const [editLimit, setEditLimit] = useState("");
   const [editReset, setEditReset] = useState("never");
   const [editAllowedModels, setEditAllowedModels] = useState("*");
+  const [activeProviders, setActiveProviders] = useState([]);
+  const [modelAliases, setModelAliases] = useState({});
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState(null); // 'create' | 'edit'
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
 
@@ -286,6 +290,27 @@ export default function APIPageClient({ machineId }) {
         const data = await res.json();
         return data.keys || [];
       };
+
+      const fetchProvidersAndAliases = async () => {
+        try {
+          const [providersRes, aliasesRes] = await Promise.all([
+            fetch("/api/providers"),
+            fetch("/api/models/alias"),
+          ]);
+          if (providersRes.ok) {
+            const pData = await providersRes.json();
+            setActiveProviders(pData.connections || []);
+          }
+          if (aliasesRes.ok) {
+            const aData = await aliasesRes.json();
+            setModelAliases(aData.aliases || {});
+          }
+        } catch (e) {
+          console.error("Error fetching providers/aliases:", e);
+        }
+      };
+
+      fetchProvidersAndAliases();
 
       let existing = await fetchKeys();
       // Auto-provision a default key for first-time users so the endpoint works out of the box.
@@ -644,6 +669,44 @@ export default function APIPageClient({ machineId }) {
       handleConnectTailscale();
     } else {
       setShowTsModal(true);
+    }
+  };
+
+  const parseAllowedModelsList = (str) => {
+    if (!str || str.trim() === "*" || str.trim() === "") return [];
+    return str
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+
+  const handleSelectModelForPicker = (model) => {
+    const modelVal = model.value;
+    if (pickerTarget === "create") {
+      const currentList = parseAllowedModelsList(newKeyAllowedModels);
+      if (!currentList.includes(modelVal)) {
+        const nextList = [...currentList, modelVal];
+        setNewKeyAllowedModels(nextList.join(", "));
+      }
+    } else if (pickerTarget === "edit") {
+      const currentList = parseAllowedModelsList(editAllowedModels);
+      if (!currentList.includes(modelVal)) {
+        const nextList = [...currentList, modelVal];
+        setEditAllowedModels(nextList.join(", "));
+      }
+    }
+  };
+
+  const handleDeselectModelForPicker = (model) => {
+    const modelVal = model.value;
+    if (pickerTarget === "create") {
+      const currentList = parseAllowedModelsList(newKeyAllowedModels);
+      const nextList = currentList.filter((m) => m !== modelVal);
+      setNewKeyAllowedModels(nextList.length === 0 ? "*" : nextList.join(", "));
+    } else if (pickerTarget === "edit") {
+      const currentList = parseAllowedModelsList(editAllowedModels);
+      const nextList = currentList.filter((m) => m !== modelVal);
+      setEditAllowedModels(nextList.length === 0 ? "*" : nextList.join(", "));
     }
   };
 
@@ -1206,12 +1269,49 @@ export default function APIPageClient({ machineId }) {
             value={newKeyReset}
             onChange={(e) => setNewKeyReset(e.target.value)}
           />
-          <Input
-            label="Allowed Models (* for all, or comma-separated: claude-*, gpt-4o)"
-            value={newKeyAllowedModels}
-            onChange={(e) => setNewKeyAllowedModels(e.target.value)}
-            placeholder="* or claude-*, gpt-4o"
-          />
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-text-main">
+                Allowed Models
+              </label>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="add"
+                onClick={() => {
+                  setPickerTarget("create");
+                  setShowModelPicker(true);
+                }}
+              >
+                Select Models
+              </Button>
+            </div>
+            <Input
+              value={newKeyAllowedModels}
+              onChange={(e) => setNewKeyAllowedModels(e.target.value)}
+              placeholder="* or claude-*, gpt-4o"
+              hint="Use * for all models, or pick models using the button above"
+            />
+            {parseAllowedModelsList(newKeyAllowedModels).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {parseAllowedModelsList(newKeyAllowedModels).map((m) => (
+                  <span
+                    key={m}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/10 text-primary font-mono text-xs"
+                  >
+                    {m}
+                    <button
+                      type="button"
+                      onClick={() => handleDeselectModelForPicker({ value: m })}
+                      className="hover:text-red-500 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">close</span>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex gap-2 mt-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1256,12 +1356,49 @@ export default function APIPageClient({ machineId }) {
             value={editReset}
             onChange={(e) => setEditReset(e.target.value)}
           />
-          <Input
-            label="Allowed Models (* for all, or comma-separated: claude-*, gpt-4o)"
-            value={editAllowedModels}
-            onChange={(e) => setEditAllowedModels(e.target.value)}
-            placeholder="* or claude-*, gpt-4o"
-          />
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-text-main">
+                Allowed Models
+              </label>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="add"
+                onClick={() => {
+                  setPickerTarget("edit");
+                  setShowModelPicker(true);
+                }}
+              >
+                Select Models
+              </Button>
+            </div>
+            <Input
+              value={editAllowedModels}
+              onChange={(e) => setEditAllowedModels(e.target.value)}
+              placeholder="* or claude-*, gpt-4o"
+              hint="Use * for all models, or pick models using the button above"
+            />
+            {parseAllowedModelsList(editAllowedModels).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {parseAllowedModelsList(editAllowedModels).map((m) => (
+                  <span
+                    key={m}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/10 text-primary font-mono text-xs"
+                  >
+                    {m}
+                    <button
+                      type="button"
+                      onClick={() => handleDeselectModelForPicker({ value: m })}
+                      className="hover:text-red-500 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">close</span>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex gap-2 mt-2">
             <Button
               onClick={() => {
@@ -1322,6 +1459,21 @@ export default function APIPageClient({ machineId }) {
           </Button>
         </div>
       </Modal>
+
+      {/* Model Select Modal for API Keys */}
+      {showModelPicker && (
+        <ModelSelectModal
+          isOpen={showModelPicker}
+          onClose={() => setShowModelPicker(false)}
+          onSelect={handleSelectModelForPicker}
+          onDeselect={handleDeselectModelForPicker}
+          activeProviders={activeProviders}
+          modelAliases={modelAliases}
+          title="Select Allowed Models"
+          addedModelValues={parseAllowedModelsList(pickerTarget === "create" ? newKeyAllowedModels : editAllowedModels)}
+          closeOnSelect={false}
+        />
+      )}
 
       {/* Enable Tunnel Modal */}
       <Modal
