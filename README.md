@@ -526,6 +526,7 @@ a third party under a provider named "Self-hosted".
 | 📝 **Request Logging**                                                            | Debug mode with full request/response logs                                               | Troubleshoot issues easily                        |
 | 💾 **Cloud Sync**                                                                 | Sync config across devices                                                               | Same setup everywhere                             |
 | 📊 **Usage Analytics**                                                            | Track tokens, cost, trends over time                                                     | Optimize spending                                 |
+| 🔑 **API Key Quota & Access Limits** *(Custom)*                                    | Token limit per key, auto-reset intervals (5h/7d/14d/30d/custom), and model filtering   | Fine-grained control over keys & models           |
 | 🌐 **Deploy Anywhere**                                                            | Localhost, VPS, Docker, Cloudflare Workers                                               | Flexible deployment options                       |
 
 Set `X-9Router-Token-Saver: off` to bypass all token savers for one chat request.
@@ -631,6 +632,15 @@ Seamless translation between formats:
 - OAuth tokens automatically refresh before expiration
 - No manual re-authentication needed
 - Seamless experience across all providers
+
+### 🔑 API Key Quota & Access Limits (Custom Features)
+
+- Set token limits per API Key (with real-time usage tracking & auto 429 response when limit reached).
+- Configurable auto-reset intervals (5 Hours, 7 Days, 14 Days, 30 Days, or custom intervals like 10h/3d).
+- Reset interval setting dynamically surfaces only when token limit > 0.
+- Allowed models restriction (wildcard matching `claude-*` or exact selection) with an interactive **Model Select Modal**.
+- Edit API Key names, limits, reset intervals, and allowed models anytime.
+- Permanent Dark Mode interface theme.
 
 ### 🎨 Custom Combos
 

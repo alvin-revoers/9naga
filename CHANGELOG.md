@@ -1,3 +1,13 @@
+# v0.5.70-Custom (2026-09-07)
+
+## Custom Features & Enhancements
+- **API Key Quota & Limits**: Add token limit per API Key with real-time usage tracking and HTTP 429 (`API key token limit exceeded`) response upon quota exhaustion.
+- **Dynamic Auto Reset Interval**: Support periodic usage reset intervals (`5h`, `7d`, `14d`, `30d`, and custom intervals such as `10h` or `3d`). Column dynamically appears only when `tokenLimit > 0`.
+- **Model Access Control**: Restrict API Keys to specific allowed models (`allowedModels`) with wildcard support (`claude-*`, `gpt-*`) or exact matches. Returns HTTP 403 when calling unauthorized models.
+- **Interactive Model Selector**: Integrated `ModelSelectModal` directly into Create & Edit API Key forms, allowing users to pick allowed models visually (same UI as Combo creation) without manual typing.
+- **Key Editing & Management**: Support editing API Key names, token limits, reset intervals, and allowed models anytime. Added manual usage reset button (`restart_alt`) to set used tokens back to 0.
+- **UI & Theme Sync**: Enforced permanent Dark Mode theme across the app, removing theme toggles and display language switcher controls for a clean UI. Updated custom select dropdown styling to match app theme.
+
 # v0.5.69 (2026-09-05)
 
 ## Features
