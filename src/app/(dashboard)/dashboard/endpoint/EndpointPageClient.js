@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Select, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   TUNNEL_BENEFITS,
@@ -25,6 +25,14 @@ function formatTokensNumber(num) {
   if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
   return num.toLocaleString();
 }
+
+const RESET_INTERVAL_OPTIONS = [
+  { value: "never", label: "Never reset" },
+  { value: "5h", label: "Every 5 Hours (5h)" },
+  { value: "7d", label: "Every 7 Days (7d)" },
+  { value: "14d", label: "Every 14 Days (14d)" },
+  { value: "30d", label: "Every 30 Days (30d)" },
+];
 
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
@@ -1192,20 +1200,12 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyLimit(e.target.value)}
             placeholder="e.g. 88000000"
           />
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-text-main">Auto Reset Interval</label>
-            <select
-              className="w-full bg-white dark:bg-black border border-black/10 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-text-main focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
-              value={newKeyReset}
-              onChange={(e) => setNewKeyReset(e.target.value)}
-            >
-              <option value="never">Never reset</option>
-              <option value="5h">Every 5 Hours (5h)</option>
-              <option value="7d">Every 7 Days (7d)</option>
-              <option value="14d">Every 14 Days (14d)</option>
-              <option value="30d">Every 30 Days (30d)</option>
-            </select>
-          </div>
+          <Select
+            label="Auto Reset Interval"
+            options={RESET_INTERVAL_OPTIONS}
+            value={newKeyReset}
+            onChange={(e) => setNewKeyReset(e.target.value)}
+          />
           <Input
             label="Allowed Models (* for all, or comma-separated: claude-*, gpt-4o)"
             value={newKeyAllowedModels}
@@ -1250,20 +1250,12 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setEditLimit(e.target.value)}
             placeholder="e.g. 88000000"
           />
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-text-main">Auto Reset Interval</label>
-            <select
-              className="w-full bg-white dark:bg-black border border-black/10 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-text-main focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
-              value={editReset}
-              onChange={(e) => setEditReset(e.target.value)}
-            >
-              <option value="never">Never reset</option>
-              <option value="5h">Every 5 Hours (5h)</option>
-              <option value="7d">Every 7 Days (7d)</option>
-              <option value="14d">Every 14 Days (14d)</option>
-              <option value="30d">Every 30 Days (30d)</option>
-            </select>
-          </div>
+          <Select
+            label="Auto Reset Interval"
+            options={RESET_INTERVAL_OPTIONS}
+            value={editReset}
+            onChange={(e) => setEditReset(e.target.value)}
+          />
           <Input
             label="Allowed Models (* for all, or comma-separated: claude-*, gpt-4o)"
             value={editAllowedModels}
