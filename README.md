@@ -1486,12 +1486,6 @@ Authorization: Bearer your-api-key
 → Returns all models + combos in OpenAI format
 ```
 
-## 📧 Support
-
-- **Website**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9router](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
-
 ---
 
 ## 👥 Contributors
