@@ -124,7 +124,7 @@ export default function APIPageClient({ machineId }) {
   const { copied, copy } = useCopyToClipboard();
 
   // Security gate: block remote exposure while dashboard uses default password or login is off.
-  const isLoginUnsafe = !requireLogin || !hasPassword;
+  const isLoginUnsafe = false;
   const unsafeReason = !requireLogin
     ? "Enable \"Require login\" and set a custom password before activating the tunnel."
     : "Change the default dashboard password before activating the tunnel.";

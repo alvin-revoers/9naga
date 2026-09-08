@@ -38,11 +38,12 @@ export {
   createCombo, updateCombo, deleteCombo,
 } from "./repos/combosRepo.js";
 
-// Aliases (model + custom + mitm)
+// Aliases (model + custom + mitm + masks)
 export {
   getModelAliases, setModelAlias, deleteModelAlias,
   getCustomModels, addCustomModel, deleteCustomModel,
   getMitmAlias, setMitmAliasAll,
+  getModelMasks, setModelMask, deleteModelMask,
 } from "./repos/aliasRepo.js";
 
 // Pricing
@@ -77,15 +78,34 @@ export async function exportDb() {
     providerConnections: db.all(`SELECT * FROM providerConnections`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, provider: r.provider, authType: r.authType, name: r.name, email: r.email, priority: r.priority, isActive: r.isActive === 1, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     providerNodes: db.all(`SELECT * FROM providerNodes`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, type: r.type, name: r.name, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     proxyPools: db.all(`SELECT * FROM proxyPools`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, isActive: r.isActive === 1, testStatus: r.testStatus, createdAt: r.createdAt, updatedAt: r.updatedAt })),
-    apiKeys: db.all(`SELECT * FROM apiKeys`).map((r) => ({ id: r.id, key: r.key, name: r.name, machineId: r.machineId, isActive: r.isActive === 1, createdAt: r.createdAt })),
+    apiKeys: db.all(`SELECT * FROM apiKeys`).map((r) => ({
+      id: r.id,
+      key: r.key,
+      name: r.name,
+      machineId: r.machineId,
+      isActive: r.isActive === 1,
+      createdAt: r.createdAt,
+      tokenLimit: r.tokenLimit,
+      usedTokens: r.usedTokens,
+      resetInterval: r.resetInterval,
+      lastResetAt: r.lastResetAt,
+      allowedModels: r.allowedModels,
+      rpmLimit: r.rpmLimit,
+      tpmLimit: r.tpmLimit,
+      ipWhitelist: r.ipWhitelist,
+    })),
     combos: db.all(`SELECT * FROM combos`).map((r) => ({ id: r.id, name: r.name, kind: r.kind, models: parseJson(r.models, []), createdAt: r.createdAt, updatedAt: r.updatedAt })),
+    usageHistory: db.all(`SELECT * FROM usageHistory`),
+    usageDaily: db.all(`SELECT * FROM usageDaily`),
     modelAliases: {},
+    modelMasks: {},
     customModels: [],
     mitmAlias: {},
     pricing: {},
   };
 
   for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'modelAliases'`)) out.modelAliases[r.key] = parseJson(r.value);
+  for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'modelMasks'`)) out.modelMasks[r.key] = parseJson(r.value);
   for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'customModels'`)) out.customModels.push(parseJson(r.value));
   for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'mitmAlias'`)) out.mitmAlias[r.key] = parseJson(r.value);
   for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'pricing'`)) out.pricing[r.key] = parseJson(r.value);
@@ -107,7 +127,9 @@ export async function importDb(payload) {
     db.run(`DELETE FROM proxyPools`);
     db.run(`DELETE FROM apiKeys`);
     db.run(`DELETE FROM combos`);
-    db.run(`DELETE FROM kv WHERE scope IN ('modelAliases', 'customModels', 'mitmAlias', 'pricing')`);
+    db.run(`DELETE FROM usageHistory`);
+    db.run(`DELETE FROM usageDaily`);
+    db.run(`DELETE FROM kv WHERE scope IN ('modelAliases', 'modelMasks', 'customModels', 'mitmAlias', 'pricing')`);
 
     // Settings
     if (payload.settings) {
@@ -137,8 +159,23 @@ export async function importDb(payload) {
     }
     for (const k of payload.apiKeys || []) {
       db.run(
-        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels, rpmLimit, tpmLimit, ipWhitelist) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          k.id,
+          k.key,
+          k.name || null,
+          k.machineId || null,
+          k.isActive === false ? 0 : 1,
+          k.createdAt || new Date().toISOString(),
+          k.tokenLimit || 0,
+          k.usedTokens || 0,
+          k.resetInterval || "never",
+          k.lastResetAt || null,
+          k.allowedModels || "*",
+          k.rpmLimit || 0,
+          k.tpmLimit || 0,
+          k.ipWhitelist || "",
+        ]
       );
     }
     for (const c of payload.combos || []) {
@@ -147,8 +184,37 @@ export async function importDb(payload) {
         [c.id, c.name, c.kind || null, stringifyJson(c.models || []), c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()]
       );
     }
+    for (const h of payload.usageHistory || []) {
+      db.run(
+        `INSERT OR REPLACE INTO usageHistory(id, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          h.id || null,
+          h.timestamp || new Date().toISOString(),
+          h.provider || null,
+          h.model || null,
+          h.connectionId || null,
+          h.apiKey || null,
+          h.endpoint || null,
+          h.promptTokens || 0,
+          h.completionTokens || 0,
+          h.cost || 0,
+          h.status || null,
+          h.tokens || null,
+          h.meta || null,
+        ]
+      );
+    }
+    for (const d of payload.usageDaily || []) {
+      db.run(
+        `INSERT OR REPLACE INTO usageDaily(dateKey, data) VALUES(?, ?)`,
+        [d.dateKey, typeof d.data === "string" ? d.data : stringifyJson(d.data)]
+      );
+    }
     for (const [a, m] of Object.entries(payload.modelAliases || {})) {
       db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('modelAliases', ?, ?)`, [a, stringifyJson(m)]);
+    }
+    for (const [a, m] of Object.entries(payload.modelMasks || {})) {
+      db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('modelMasks', ?, ?)`, [a, stringifyJson(m)]);
     }
     for (const m of payload.customModels || []) {
       const k = `${m.providerAlias}|${m.id}|${m.type || "llm"}`;

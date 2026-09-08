@@ -79,12 +79,6 @@ export default function ProfilePage() {
   const [proxyLoading, setProxyLoading] = useState(false);
   const [proxyTestLoading, setProxyTestLoading] = useState(false);
 
-  const [isRemoteHost, setIsRemoteHost] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined")
-      setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
-  }, []);
-
   useEffect(() => {
     fetch("/api/settings")
       .then((res) => res.json())
@@ -766,18 +760,7 @@ export default function ProfilePage() {
       <div className="flex flex-col gap-6">
         {/* Local Mode Info */}
         <Card>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="size-10 sm:size-12 rounded-lg bg-green-500/10 text-green-500 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-xl sm:text-2xl">computer</span>
-              </div>
-              <div>
-                <h2 className="text-lg sm:text-xl font-semibold">Local Mode</h2>
-                <p className="text-sm text-text-muted">Running on your machine</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3 pt-4 border-t border-border">
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-bg border border-border gap-2">
               <div>
                 <p className="font-medium text-sm sm:text-base">Database Location</p>
@@ -1594,12 +1577,6 @@ export default function ProfilePage() {
           >
             Logout
           </Button>
-        </div>
-
-        {/* App Info */}
-        <div className="text-center text-xs sm:text-sm text-text-muted py-4">
-          <p>{APP_CONFIG.name} v{APP_CONFIG.version}</p>
-          <p className="mt-1">{isRemoteHost ? "Remote Mode" : "Local Mode - All data stored on your machine"}</p>
         </div>
       </div>
 

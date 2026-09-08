@@ -25,6 +25,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { getModelMasks } from "@/lib/db/repos/aliasRepo.js";
 
 /**
  * Handle chat completion request
@@ -52,8 +53,28 @@ export async function handleChat(request, clientRawRequest = null) {
   // Claude Code marks a 1M-context request as `<model>[1m]`; the marker matches
   // no combo, alias or provider/model pair, so it must not reach resolution.
   // The capability travels in the anthropic-beta header, forwarded as-is.
-  const { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
+  let { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
   if (contextMarker) body.model = modelStr;
+
+  try {
+    const masks = await getModelMasks();
+    if (masks && masks[modelStr]) {
+      const mask = masks[modelStr];
+      if (mask.targetModel) {
+        body.model = mask.targetModel;
+        modelStr = mask.targetModel;
+      }
+      if (mask.systemPrompt) {
+        if (Array.isArray(body.messages)) {
+          body.messages.unshift({ role: "system", content: mask.systemPrompt });
+        } else if (typeof body.system === "string") {
+          body.system = mask.systemPrompt + "\n\n" + body.system;
+        } else {
+          body.system = mask.systemPrompt;
+        }
+      }
+    }
+  } catch { /* fail open */ }
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
