@@ -119,6 +119,12 @@ export async function importDb(payload) {
   }
   const db = await getAdapter();
 
+  // Snapshot existing apiKeys BEFORE wiping, so we can fill in missing fields from backup
+  const existingApiKeys = {};
+  for (const r of db.all(`SELECT * FROM apiKeys`)) {
+    existingApiKeys[r.id] = r;
+  }
+
   db.transaction(() => {
     // Wipe all tables (keep _meta)
     db.run(`DELETE FROM settings`);
@@ -158,6 +164,17 @@ export async function importDb(payload) {
       );
     }
     for (const k of payload.apiKeys || []) {
+      // Merge with existing data: if a field was missing from backup (old format), keep the previous value
+      const prev = existingApiKeys[k.id] || {};
+      const tokenLimit = k.tokenLimit !== undefined ? Number(k.tokenLimit) : (prev.tokenLimit !== undefined ? Number(prev.tokenLimit) : 0);
+      const usedTokens = k.usedTokens !== undefined ? Number(k.usedTokens) : (prev.usedTokens !== undefined ? Number(prev.usedTokens) : 0);
+      const resetInterval = k.resetInterval !== undefined ? k.resetInterval : (prev.resetInterval || "never");
+      const lastResetAt = k.lastResetAt !== undefined ? k.lastResetAt : (prev.lastResetAt || null);
+      const allowedModels = k.allowedModels !== undefined ? k.allowedModels : (prev.allowedModels || "*");
+      const rpmLimit = k.rpmLimit !== undefined ? Number(k.rpmLimit) : (prev.rpmLimit !== undefined ? Number(prev.rpmLimit) : 0);
+      const tpmLimit = k.tpmLimit !== undefined ? Number(k.tpmLimit) : (prev.tpmLimit !== undefined ? Number(prev.tpmLimit) : 0);
+      const ipWhitelist = k.ipWhitelist !== undefined ? k.ipWhitelist : (prev.ipWhitelist || "");
+
       db.run(
         `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels, rpmLimit, tpmLimit, ipWhitelist) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -167,14 +184,14 @@ export async function importDb(payload) {
           k.machineId || null,
           k.isActive === false ? 0 : 1,
           k.createdAt || new Date().toISOString(),
-          k.tokenLimit || 0,
-          k.usedTokens || 0,
-          k.resetInterval || "never",
-          k.lastResetAt || null,
-          k.allowedModels || "*",
-          k.rpmLimit || 0,
-          k.tpmLimit || 0,
-          k.ipWhitelist || "",
+          tokenLimit,
+          usedTokens,
+          resetInterval,
+          lastResetAt,
+          allowedModels,
+          rpmLimit,
+          tpmLimit,
+          ipWhitelist,
         ]
       );
     }
@@ -186,9 +203,8 @@ export async function importDb(payload) {
     }
     for (const h of payload.usageHistory || []) {
       db.run(
-        `INSERT OR REPLACE INTO usageHistory(id, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          h.id || null,
           h.timestamp || new Date().toISOString(),
           h.provider || null,
           h.model || null,

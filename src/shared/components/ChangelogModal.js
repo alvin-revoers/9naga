@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
 import { marked } from "marked";
-import { SegmentedControl } from "@/shared/components";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -12,30 +11,54 @@ const DECOLUA_URL = "https://raw.githubusercontent.com/decolua/9router/refs/head
 const SERENHOPE_URL = "https://raw.githubusercontent.com/serenhope/9router/refs/heads/master/CHANGELOG.md";
 
 export default function ChangelogModal({ isOpen, onClose }) {
-  const [activeTab, setActiveTab] = useState("serenhope"); // "serenhope" | "decolua"
-  const [decoluaHtml, setDecoluaHtml] = useState("");
-  const [serenhopeHtml, setSerenhopeHtml] = useState("");
+  const [combinedHtml, setCombinedHtml] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const modalRef = useRef(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || combinedHtml) return;
     setLoading(true);
     setError("");
 
     Promise.all([
-      fetch(DECOLUA_URL).then(r => r.text()).catch(() => ""),
-      fetch(SERENHOPE_URL).then(r => r.text()).catch(() => ""),
-    ]).then(([decoluaMd, serenhopeMd]) => {
-      if (decoluaMd) setDecoluaHtml(marked.parse(decoluaMd));
-      if (serenhopeMd) setSerenhopeHtml(marked.parse(serenhopeMd));
-    }).catch(err => {
-      setError(err.message || "Failed to load changelog");
-    }).finally(() => {
-      setLoading(false);
-    });
-  }, [isOpen]);
+      fetch(DECOLUA_URL).then((r) => r.ok ? r.text() : "").catch(() => ""),
+      fetch(SERENHOPE_URL).then((r) => r.ok ? r.text() : "").catch(() => ""),
+    ])
+      .then(([decoluaMd, serenhopeMd]) => {
+        // Official changelog from Decolua (or fallback)
+        const decoluaHtml = decoluaMd ? marked.parse(decoluaMd) : "";
+
+        // Extract only Serenhope's custom entries (v0.5.70-Custom section onwards)
+        // Parse Serenhope's own CHANGELOG.md and wrap it in a styled section
+        const serenhopeHtml = serenhopeMd ? marked.parse(serenhopeMd) : "";
+
+        const serenSection = serenhopeHtml
+          ? `<div style="margin-bottom:32px;padding:16px;border:1px solid rgba(96,165,250,0.3);border-radius:12px;background:rgba(96,165,250,0.05);">
+              <h2 style="display:flex;align-items:center;gap:8px;margin:0 0 16px 0;font-size:18px;font-weight:600;color:#60a5fa;">
+                <span class="material-symbols-outlined" style="font-size:20px;">star</span>
+                Contributed by Seren
+              </h2>
+              <div class="seren-contrib">${serenhopeHtml}</div>
+            </div>`
+          : "";
+
+        const divider = decoluaHtml && serenhopeHtml
+          ? `<div style="margin:32px 0 0 0;padding-top:24px;border-top:1px solid rgba(128,128,128,0.15);">
+              <h2 style="display:flex;align-items:center;gap:8px;margin:0 0 16px 0;font-size:18px;font-weight:600;color:rgba(128,128,128,0.8);">
+                <span class="material-symbols-outlined" style="font-size:20px;">history_edu</span>
+                Official Releases (Decolua)
+              </h2>
+            </div>`
+          : "";
+
+        setCombinedHtml(serenSection + divider + decoluaHtml);
+      })
+      .catch((err) => {
+        setError(err.message || "Failed to load changelog");
+      })
+      .finally(() => setLoading(false));
+  }, [isOpen, combinedHtml]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -49,9 +72,12 @@ export default function ChangelogModal({ isOpen, onClose }) {
     }
   }, [isOpen, onClose]);
 
-  if (!isOpen || typeof document === "undefined") return null;
+  // Reset content when modal closes
+  useEffect(() => {
+    if (!isOpen) setCombinedHtml("");
+  }, [isOpen]);
 
-  const currentHtml = activeTab === "decolua" ? decoluaHtml : serenhopeHtml;
+  if (!isOpen || typeof document === "undefined") return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -63,7 +89,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
         ref={modalRef}
         className="relative w-full bg-surface border border-black/10 dark:border-white/10 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-w-3xl flex flex-col max-h-[85vh]"
       >
-        <div className="flex items-center justify-between p-4 border-b border-black/5 dark:border-white/5">
+        <div className="flex items-center justify-between p-3 border-b border-black/5 dark:border-white/5">
           <h2 className="text-lg font-semibold text-text-main">Change Log</h2>
           <button
             onClick={onClose}
@@ -73,18 +99,6 @@ export default function ChangelogModal({ isOpen, onClose }) {
           </button>
         </div>
 
-        <div className="px-4 pt-3">
-          <SegmentedControl
-            options={[
-              { value: "serenhope", label: "Updated by Serenhope" },
-              { value: "decolua", label: "Updated by Decolua" },
-            ]}
-            value={activeTab}
-            onChange={setActiveTab}
-            fullWidth
-          />
-        </div>
-
         <div className="p-6 overflow-y-auto flex-1 prose dark:prose-invert max-w-none text-sm">
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -92,8 +106,8 @@ export default function ChangelogModal({ isOpen, onClose }) {
             </div>
           ) : error ? (
             <p className="text-red-500">{error}</p>
-          ) : currentHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: currentHtml }} />
+          ) : combinedHtml ? (
+            <div dangerouslySetInnerHTML={{ __html: combinedHtml }} />
           ) : (
             <p className="text-text-muted">No changelog available.</p>
           )}
