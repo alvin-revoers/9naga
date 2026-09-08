@@ -20,13 +20,15 @@ function ArenaContent() {
   const [showModelPicker, setShowModelPicker] = useState(null); // index of model picker
   const [activeProviders, setActiveProviders] = useState([]);
   const [modelAliases, setModelAliases] = useState({});
+  const [activeApiKey, setActiveApiKey] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [providersRes, aliasesRes] = await Promise.all([
+        const [providersRes, aliasesRes, keysRes] = await Promise.all([
           fetch("/api/providers"),
           fetch("/api/models/alias"),
+          fetch("/api/keys"),
         ]);
         if (providersRes.ok) {
           const pData = await providersRes.json();
@@ -36,8 +38,15 @@ function ArenaContent() {
           const aData = await aliasesRes.json();
           setModelAliases(aData.aliases || {});
         }
+        if (keysRes.ok) {
+          const kData = await keysRes.json();
+          const firstActiveKey = (kData.keys || []).find((k) => k.isActive !== false);
+          if (firstActiveKey?.key) {
+            setActiveApiKey(firstActiveKey.key);
+          }
+        }
       } catch (e) {
-        console.error("Error fetching providers/aliases:", e);
+        console.error("Error fetching providers/aliases/keys:", e);
       }
     };
     fetchData();
@@ -65,12 +74,15 @@ function ArenaContent() {
 
       const start = Date.now();
       try {
+        const headers = {
+          "Content-Type": "application/json",
+        };
+        if (activeApiKey) {
+          headers["Authorization"] = `Bearer ${activeApiKey}`;
+        }
         const res = await fetch("/v1/chat/completions", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer local",
-          },
+          headers,
           body: JSON.stringify({
             model: model,
             messages: [{ role: "user", content: prompt }],
