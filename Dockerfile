@@ -1,39 +1,19 @@
-# syntax=docker/dockerfile:1.7
-ARG NODE_IMAGE=node:22-alpine
-FROM ${NODE_IMAGE} AS base
+FROM node:20-alpine
+
 WORKDIR /app
-# CN mirror for apk (used by builder and runner stages)
-RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 
-FROM base AS builder
+# Salin seluruh file proyek ke dalam kontainer
+COPY . .
 
-RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
-
-COPY package.json ./
-RUN npm install --registry=https://registry.npmmirror.com
-
-COPY . ./
-ENV NEXT_TELEMETRY_DISABLED=1
+# Instal semua dependensi dan kompilasi aplikasi Next.js
+RUN npm install
 RUN npm run build
 
-FROM ${NODE_IMAGE} AS runner
-WORKDIR /app
+# Buka port bawaan aplikasi 9Router
+EXPOSE 20128
 
-LABEL org.opencontainers.image.title="9router"
-
-ENV NODE_ENV=production
-ENV PORT=20128
-ENV HOSTNAME=0.0.0.0
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATA_DIR=/app/data
-
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/custom-server.js ./custom-server.js
-COPY --from=builder /app/open-sse ./open-sse
-# Next file tracing can omit sibling files; MITM runs server.js as a separate process.
-COPY --from=builder /app/src/mitm ./src/mitm
+# Jalankan perintah start saat kontainer menyala
+CMD ["npm", "run", "start"]
 # Standalone node_modules may omit deps only required by the MITM child process.
 COPY --from=builder /app/node_modules/node-forge ./node_modules/node-forge
 # Ensure `next` is available at runtime in case tracing did not include it.
