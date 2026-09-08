@@ -28,6 +28,10 @@ const navItems = [
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
 ];
 
+const experimentItems = [
+  { href: "/dashboard/arena", label: "Model Arena", icon: "swords" },
+];
+
 const debugItems = [
   { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
   { href: "/dashboard/translator", label: "Translator", icon: "translate" },
@@ -179,6 +183,36 @@ export default function Sidebar({ onClose }) {
               <span className="text-[13px] font-medium">{item.label}</span>
             </Link>
           ))}
+
+          {/* Experiment section */}
+          <div className="pt-3 mt-2 space-y-0.5">
+            <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-2">
+              Experiment
+            </p>
+            {experimentItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onClose}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group",
+                  isActive(item.href)
+                    ? "bg-primary/10 text-primary"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                )}
+              >
+                <span
+                  className={cn(
+                    "material-symbols-outlined text-[18px]",
+                    isActive(item.href) ? "fill-1" : "group-hover:text-primary transition-colors"
+                  )}
+                >
+                  {item.icon}
+                </span>
+                <span className="text-[13px] font-medium">{item.label}</span>
+              </Link>
+            ))}
+          </div>
 
           {/* System section */}
           <div className="pt-3 mt-2 space-y-0.5">

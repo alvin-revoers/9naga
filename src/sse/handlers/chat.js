@@ -9,6 +9,7 @@ import {
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
+import { getClientIp } from "@/lib/auth/loginLimiter";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -24,6 +25,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { getModelMasks } from "@/lib/db/repos/aliasRepo.js";
 
 /**
  * Handle chat completion request
@@ -51,8 +53,28 @@ export async function handleChat(request, clientRawRequest = null) {
   // Claude Code marks a 1M-context request as `<model>[1m]`; the marker matches
   // no combo, alias or provider/model pair, so it must not reach resolution.
   // The capability travels in the anthropic-beta header, forwarded as-is.
-  const { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
+  let { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
   if (contextMarker) body.model = modelStr;
+
+  try {
+    const masks = await getModelMasks();
+    if (masks && masks[modelStr]) {
+      const mask = masks[modelStr];
+      if (mask.targetModel) {
+        body.model = mask.targetModel;
+        modelStr = mask.targetModel;
+      }
+      if (mask.systemPrompt) {
+        if (Array.isArray(body.messages)) {
+          body.messages.unshift({ role: "system", content: mask.systemPrompt });
+        } else if (typeof body.system === "string") {
+          body.system = mask.systemPrompt + "\n\n" + body.system;
+        } else {
+          body.system = mask.systemPrompt;
+        }
+      }
+    }
+  } catch { /* fail open */ }
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
@@ -79,10 +101,23 @@ export async function handleChat(request, clientRawRequest = null) {
   }
 
   if (apiKey) {
-    const valid = await isValidApiKey(apiKey, modelStr);
+    const clientIp = getClientIp(request);
+    const valid = await isValidApiKey(apiKey, modelStr, clientIp);
     if (valid === "QUOTA_EXCEEDED") {
       log.warn("AUTH", "API key quota exceeded");
       return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "API key token limit exceeded");
+    }
+    if (valid === "RPM_EXCEEDED") {
+      log.warn("AUTH", "API key RPM limit exceeded");
+      return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "API key rate limit exceeded (RPM limit reached)");
+    }
+    if (valid === "TPM_EXCEEDED") {
+      log.warn("AUTH", "API key TPM limit exceeded");
+      return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "API key rate limit exceeded (TPM limit reached)");
+    }
+    if (valid === "IP_NOT_ALLOWED") {
+      log.warn("AUTH", `IP "${clientIp}" not in whitelist for this API key`);
+      return errorResponse(HTTP_STATUS.FORBIDDEN, `Client IP (${clientIp}) is not authorized to use this API key`);
     }
     if (valid === "MODEL_NOT_ALLOWED") {
       log.warn("AUTH", `Model "${modelStr}" not allowed for this API key`);
@@ -285,6 +320,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       apiKey,
       ccFilterNaming: !!chatSettings.ccFilterNaming,
       rtkEnabled: !!chatSettings.rtkEnabled,
+      contextPruningEnabled: !!chatSettings.contextPruningEnabled,
+      maxMessagesLimit: chatSettings.maxMessagesLimit || 20,
+      semanticCacheEnabled: !!chatSettings.semanticCacheEnabled,
       headroomEnabled: !!chatSettings.headroomEnabled,
       headroomUrl: chatSettings.headroomUrl || DEFAULT_HEADROOM_URL,
       headroomCompressUserMessages: !!chatSettings.headroomCompressUserMessages,

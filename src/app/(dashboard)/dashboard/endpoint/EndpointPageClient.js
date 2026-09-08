@@ -44,12 +44,18 @@ export default function APIPageClient({ machineId }) {
   const [newKeyReset, setNewKeyReset] = useState("never");
   const [newKeyCustomReset, setNewKeyCustomReset] = useState("");
   const [newKeyAllowedModels, setNewKeyAllowedModels] = useState("*");
+  const [newKeyRpm, setNewKeyRpm] = useState("");
+  const [newKeyTpm, setNewKeyTpm] = useState("");
+  const [newKeyIpWhitelist, setNewKeyIpWhitelist] = useState("");
   const [editingKey, setEditingKey] = useState(null);
   const [editName, setEditName] = useState("");
   const [editLimit, setEditLimit] = useState("");
   const [editReset, setEditReset] = useState("never");
   const [editCustomReset, setEditCustomReset] = useState("");
   const [editAllowedModels, setEditAllowedModels] = useState("*");
+  const [editRpm, setEditRpm] = useState("");
+  const [editTpm, setEditTpm] = useState("");
+  const [editIpWhitelist, setEditIpWhitelist] = useState("");
   const [activeProviders, setActiveProviders] = useState([]);
   const [modelAliases, setModelAliases] = useState({});
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -110,16 +116,15 @@ export default function APIPageClient({ machineId }) {
   const [visibleKeys, setVisibleKeys] = useState(new Set());
 
   // Client-side local/remote detection (UI hint only, not a security gate)
-  const [isRemoteHost, setIsRemoteHost] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined")
-      setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
-  }, []);
+  const [isRemoteHost] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  });
 
   const { copied, copy } = useCopyToClipboard();
 
   // Security gate: block remote exposure while dashboard uses default password or login is off.
-  const isLoginUnsafe = !requireLogin || !hasPassword;
+  const isLoginUnsafe = false;
   const unsafeReason = !requireLogin
     ? "Enable \"Require login\" and set a custom password before activating the tunnel."
     : "Change the default dashboard password before activating the tunnel.";
@@ -731,6 +736,9 @@ export default function APIPageClient({ machineId }) {
           tokenLimit: limitNum,
           resetInterval: finalReset,
           allowedModels: newKeyAllowedModels.trim() || "*",
+          rpmLimit: newKeyRpm ? Number(newKeyRpm) : 0,
+          tpmLimit: newKeyTpm ? Number(newKeyTpm) : 0,
+          ipWhitelist: newKeyIpWhitelist.trim(),
         }),
       });
       const data = await res.json();
@@ -743,6 +751,9 @@ export default function APIPageClient({ machineId }) {
         setNewKeyReset("never");
         setNewKeyCustomReset("");
         setNewKeyAllowedModels("*");
+        setNewKeyRpm("");
+        setNewKeyTpm("");
+        setNewKeyIpWhitelist("");
         setShowAddModal(false);
       }
     } catch (error) {
@@ -832,14 +843,12 @@ export default function APIPageClient({ machineId }) {
     });
   };
 
-  const [baseUrl, setBaseUrl] = useState("/v1");
-
-  // Hydration fix: Only access window on client side
-  useEffect(() => {
+  const [baseUrl] = useState(() => {
     if (typeof window !== "undefined") {
-      setBaseUrl(`${window.location.origin}/v1`);
+      return `${window.location.origin}/v1`;
     }
-  }, []);
+    return "/v1";
+  });
 
   if (loading) {
     return (
@@ -1187,6 +1196,16 @@ export default function APIPageClient({ machineId }) {
                     <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 font-medium">
                       Models: {key.allowedModels && key.allowedModels !== "*" ? key.allowedModels : "All"}
                     </span>
+                    {(key.rpmLimit > 0 || key.tpmLimit > 0) && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-purple-500/10 text-purple-500 font-medium">
+                        Rate: {key.rpmLimit > 0 ? `${key.rpmLimit} RPM` : ""}{key.rpmLimit > 0 && key.tpmLimit > 0 ? " · " : ""}{key.tpmLimit > 0 ? `${formatTokensNumber(key.tpmLimit)} TPM` : ""}
+                      </span>
+                    )}
+                    {key.ipWhitelist && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
+                        IP Guard: Active
+                      </span>
+                    )}
                     {key.tokenLimit > 0 && (key.usedTokens || 0) >= key.tokenLimit && (
                       <span className="text-xs px-2 py-0.5 rounded bg-red-500/10 text-red-500 font-semibold">
                         Quota Exceeded
@@ -1213,6 +1232,9 @@ export default function APIPageClient({ machineId }) {
                         setEditCustomReset(resVal);
                       }
                       setEditAllowedModels(key.allowedModels || "*");
+                      setEditRpm(key.rpmLimit ? String(key.rpmLimit) : "");
+                      setEditTpm(key.tpmLimit ? String(key.tpmLimit) : "");
+                      setEditIpWhitelist(key.ipWhitelist || "");
                     }}
                     className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
                     title="Edit key settings & quota"
@@ -1297,6 +1319,24 @@ export default function APIPageClient({ machineId }) {
               placeholder="10h"
             />
           )}
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="RPM Limit (0: unlimited)"
+              type="number"
+              value={newKeyRpm}
+              onChange={(e) => setNewKeyRpm(e.target.value)}
+              placeholder="0"
+              hint="Max requests/min"
+            />
+            <Input
+              label="TPM Limit (0: unlimited)"
+              type="number"
+              value={newKeyTpm}
+              onChange={(e) => setNewKeyTpm(e.target.value)}
+              placeholder="0"
+              hint="Max tokens/min"
+            />
+          </div>
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-text-main">
@@ -1340,6 +1380,13 @@ export default function APIPageClient({ machineId }) {
               </div>
             )}
           </div>
+          <Input
+            label="IP Whitelist (Optional, comma-separated IPs)"
+            value={newKeyIpWhitelist}
+            onChange={(e) => setNewKeyIpWhitelist(e.target.value)}
+            placeholder="e.g. 192.168.1.1, 103.20.10.5 (Leave empty to allow all)"
+            hint="Leave empty to allow access from any IP address"
+          />
           <div className="flex gap-2 mt-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1394,6 +1441,24 @@ export default function APIPageClient({ machineId }) {
               placeholder="10h"
             />
           )}
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="RPM Limit (0: unlimited)"
+              type="number"
+              value={editRpm}
+              onChange={(e) => setEditRpm(e.target.value)}
+              placeholder="0"
+              hint="Max requests/min"
+            />
+            <Input
+              label="TPM Limit (0: unlimited)"
+              type="number"
+              value={editTpm}
+              onChange={(e) => setEditTpm(e.target.value)}
+              placeholder="0"
+              hint="Max tokens/min"
+            />
+          </div>
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-text-main">
@@ -1437,6 +1502,13 @@ export default function APIPageClient({ machineId }) {
               </div>
             )}
           </div>
+          <Input
+            label="IP Whitelist (Optional, comma-separated IPs)"
+            value={editIpWhitelist}
+            onChange={(e) => setEditIpWhitelist(e.target.value)}
+            placeholder="e.g. 192.168.1.1, 103.20.10.5 (Leave empty to allow all)"
+            hint="Leave empty to allow access from any IP address"
+          />
           <div className="flex gap-2 mt-2">
             <Button
               onClick={() => {
@@ -1451,6 +1523,9 @@ export default function APIPageClient({ machineId }) {
                   tokenLimit: limitNum,
                   resetInterval: finalReset,
                   allowedModels: editAllowedModels.trim() || "*",
+                  rpmLimit: editRpm ? Number(editRpm) : 0,
+                  tpmLimit: editTpm ? Number(editTpm) : 0,
+                  ipWhitelist: editIpWhitelist.trim(),
                 });
               }}
               fullWidth

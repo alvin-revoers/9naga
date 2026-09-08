@@ -15,6 +15,9 @@ function rowToKey(row) {
     resetInterval: row.resetInterval || "never",
     lastResetAt: row.lastResetAt || null,
     allowedModels: row.allowedModels || "*",
+    rpmLimit: row.rpmLimit || 0,
+    tpmLimit: row.tpmLimit || 0,
+    ipWhitelist: row.ipWhitelist || "",
   };
 }
 
@@ -48,9 +51,12 @@ export async function createApiKey(name, machineId, options = {}) {
     resetInterval: options.resetInterval || "never",
     lastResetAt: options.lastResetAt || now,
     allowedModels: options.allowedModels || "*",
+    rpmLimit: Number(options.rpmLimit) || 0,
+    tpmLimit: Number(options.tpmLimit) || 0,
+    ipWhitelist: options.ipWhitelist || "",
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels, rpmLimit, tpmLimit, ipWhitelist) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -63,6 +69,9 @@ export async function createApiKey(name, machineId, options = {}) {
       apiKey.resetInterval,
       apiKey.lastResetAt,
       apiKey.allowedModels,
+      apiKey.rpmLimit,
+      apiKey.tpmLimit,
+      apiKey.ipWhitelist,
     ]
   );
   return apiKey;
@@ -76,7 +85,7 @@ export async function updateApiKey(id, data) {
     if (!row) return;
     const merged = { ...rowToKey(row), ...data };
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, resetInterval = ?, lastResetAt = ?, allowedModels = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, resetInterval = ?, lastResetAt = ?, allowedModels = ?, rpmLimit = ?, tpmLimit = ?, ipWhitelist = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -87,6 +96,9 @@ export async function updateApiKey(id, data) {
         merged.resetInterval || "never",
         merged.lastResetAt || null,
         merged.allowedModels || "*",
+        Number(merged.rpmLimit) || 0,
+        Number(merged.tpmLimit) || 0,
+        merged.ipWhitelist || "",
         id,
       ]
     );
@@ -101,7 +113,43 @@ export async function deleteApiKey(id) {
   return (res?.changes ?? 0) > 0;
 }
 
-export async function validateApiKey(key, requestedModel = null) {
+// In-memory sliding window rate limiter state for RPM/TPM per API key
+if (!global._apiKeyRateLimits) global._apiKeyRateLimits = {};
+const rateLimits = global._apiKeyRateLimits;
+
+function checkRateLimits(key, rpmLimit, tpmLimit) {
+  if (rpmLimit <= 0 && tpmLimit <= 0) return true;
+  const now = Date.now();
+  if (!rateLimits[key]) {
+    rateLimits[key] = [];
+  }
+
+  // Filter out events older than 60 seconds (1 minute window)
+  rateLimits[key] = rateLimits[key].filter((req) => now - req.ts < 60000);
+  const recent = rateLimits[key];
+
+  if (rpmLimit > 0 && recent.length >= rpmLimit) {
+    return "RPM_EXCEEDED";
+  }
+
+  if (tpmLimit > 0) {
+    const totalTokensInWindow = recent.reduce((sum, r) => sum + (r.tokens || 0), 0);
+    if (totalTokensInWindow >= tpmLimit) {
+      return "TPM_EXCEEDED";
+    }
+  }
+
+  return true;
+}
+
+export function recordApiKeyUsageInWindow(key, tokens = 0) {
+  if (!key) return;
+  const now = Date.now();
+  if (!rateLimits[key]) rateLimits[key] = [];
+  rateLimits[key].push({ ts: now, tokens: tokens || 0 });
+}
+
+export async function validateApiKey(key, requestedModel = null, clientIp = null) {
   const db = await getAdapter();
   let result = false;
 
@@ -114,6 +162,16 @@ export async function validateApiKey(key, requestedModel = null) {
     if (row.isActive !== 1 && row.isActive !== true) {
       result = false;
       return;
+    }
+
+    // Check IP whitelist (empty = disabled/allow all)
+    const ipWhitelist = (row.ipWhitelist || "").trim();
+    if (ipWhitelist && clientIp) {
+      const allowedIps = ipWhitelist.split(",").map((ip) => ip.trim()).filter(Boolean);
+      if (allowedIps.length > 0 && !allowedIps.includes(clientIp)) {
+        result = "IP_NOT_ALLOWED";
+        return;
+      }
     }
 
     const tokenLimit = Number(row.tokenLimit) || 0;
@@ -185,6 +243,15 @@ export async function validateApiKey(key, requestedModel = null) {
         result = "MODEL_NOT_ALLOWED";
         return;
       }
+    }
+
+    // Check RPM & TPM rate limits
+    const rpmLimit = Number(row.rpmLimit) || 0;
+    const tpmLimit = Number(row.tpmLimit) || 0;
+    const rateCheck = checkRateLimits(key, rpmLimit, tpmLimit);
+    if (rateCheck !== true) {
+      result = rateCheck;
+      return;
     }
 
     result = true;
