@@ -25,7 +25,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
-import { getModelMasks } from "@/lib/db/repos/aliasRepo.js";
+
 
 /**
  * Handle chat completion request
@@ -56,25 +56,6 @@ export async function handleChat(request, clientRawRequest = null) {
   let { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
   if (contextMarker) body.model = modelStr;
 
-  try {
-    const masks = await getModelMasks();
-    if (masks && masks[modelStr]) {
-      const mask = masks[modelStr];
-      if (mask.targetModel) {
-        body.model = mask.targetModel;
-        modelStr = mask.targetModel;
-      }
-      if (mask.systemPrompt) {
-        if (Array.isArray(body.messages)) {
-          body.messages.unshift({ role: "system", content: mask.systemPrompt });
-        } else if (typeof body.system === "string") {
-          body.system = mask.systemPrompt + "\n\n" + body.system;
-        } else {
-          body.system = mask.systemPrompt;
-        }
-      }
-    }
-  } catch { /* fail open */ }
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
@@ -88,7 +69,7 @@ export async function handleChat(request, clientRawRequest = null) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
-  if (!modelStr) {
+ if (typeof modelStr !== "string" || !modelStr.trim()) {
     log.warn("CHAT", "Missing model");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
@@ -103,6 +84,10 @@ export async function handleChat(request, clientRawRequest = null) {
   if (apiKey) {
     const clientIp = getClientIp(request);
     const valid = await isValidApiKey(apiKey, modelStr, clientIp);
+    if (valid === "KEY_DISABLED") {
+      log.warn("AUTH", "API key is disabled");
+      return errorResponse(HTTP_STATUS.FORBIDDEN, "API key is disabled");
+    }
     if (valid === "QUOTA_EXCEEDED") {
       log.warn("AUTH", "API key quota exceeded");
       return errorResponse(HTTP_STATUS.TOO_MANY_REQUESTS, "API key token limit exceeded");
@@ -123,6 +108,10 @@ export async function handleChat(request, clientRawRequest = null) {
       log.warn("AUTH", `Model "${modelStr}" not allowed for this API key`);
       return errorResponse(HTTP_STATUS.FORBIDDEN, `Model "${modelStr}" is not allowed for this API key`);
     }
+ if (valid === "KEY_EXPIRED") {
+ log.warn("AUTH", "API key expired");
+ return errorResponse(HTTP_STATUS.FORBIDDEN, "API key has expired");
+ }
     if (!valid && settings.requireApiKey) {
       log.warn("AUTH", "Invalid API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
@@ -262,12 +251,51 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
   }
 
-  const { provider, model } = modelInfo;
+  let { provider, model } = modelInfo;
+ let effectiveModel = model;
+
+ // Model overrides: a Model Studio name wins over a per-model override.
+ try {
+  const { getStudioModel, getModelOverride } = await import("@/lib/db/repos/modelEditorRepo.js");
+  const studio = await getStudioModel(modelStr);
+  const override = studio || (provider ? await getModelOverride(`${provider}|${model}`) : null);
+  if (override) {
+   if (!studio && override.targetModel) {
+    // A model override may point at another provider, and then its target is a model
+    // string too: resolving it keeps a `kr/...` prefix out of the upstream body.
+    const target = String(override.targetModel).trim();
+    const resolvedTarget = target.includes("/") ? await getModelInfo(target) : null;
+    if (resolvedTarget?.provider) {
+     provider = resolvedTarget.provider;
+     model = resolvedTarget.model;
+     effectiveModel = resolvedTarget.model;
+    } else {
+     effectiveModel = target;
+    }
+   }
+   if (override.systemPrompt) {
+    if (Array.isArray(body.messages)) {
+     body.messages.unshift({ role: "system", content: override.systemPrompt });
+    } else if (typeof body.system === "string") {
+     body.system = override.systemPrompt + "\n\n" + body.system;
+    } else {
+     body.system = override.systemPrompt;
+    }
+   }
+   if (studio) {
+    log.info("CHAT", `Custom model ${modelStr} -> ${provider}/${effectiveModel}`);
+   }
+  }
+ } catch { /* fail open */ }
 
   // Routing shown in the unified "▶" line (client model → provider/model)
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
+
+  // What the caller may be told: an alias never names the model that served it.
+  const requestedModel = modelStr && modelStr !== `${provider}/${effectiveModel}` ? modelStr : null;
+  const calledModel = requestedModel || `${provider}/${effectiveModel}`;
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -283,11 +311,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = HTTP_STATUS.SERVICE_UNAVAILABLE;
         log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
-        return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        return unavailableResponse(status, `[${calledModel}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
         log.warn("AUTH", `No active credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
+        return errorResponse(HTTP_STATUS.NOT_FOUND, `No credentials are serving ${calledModel} right now`);
       }
       log.warn("CHAT", "No more accounts available", { provider });
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
@@ -310,8 +338,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const chatSettings = await getSettings();
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const result = await handleChatCore({
-      body: { ...body, model: `${provider}/${model}` },
-      modelInfo: { provider, model },
+      body: { ...body, model: `${provider}/${effectiveModel}` },
+      modelInfo: { provider, model: effectiveModel },
+ requestedModel,
       credentials: refreshedCredentials,
       log,
       clientRawRequest,

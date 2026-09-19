@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, Button, Toggle, Input } from "@/shared/components";
+import { Card, Button, Toggle, Input, Select, DownloadBackupModal } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { cn } from "@/shared/utils/cn";
@@ -18,6 +18,17 @@ function getLocaleFromCookie() {
   return normalizeLocale(value);
 }
 
+function formatCountdown(ms) {
+  const total = Math.floor(Math.max(0, Number.isFinite(ms) ? ms : 0) / 1000);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
 export default function ProfilePage() {
   const [locale, setLocale] = useState(() => getLocaleFromCookie());
   const [langOpen, setLangOpen] = useState(false);
@@ -31,6 +42,7 @@ export default function ProfilePage() {
   const [dbLoading, setDbLoading] = useState(false);
   const [dbStatus, setDbStatus] = useState({ type: "", message: "" });
   const [dbAuth, setDbAuth] = useState({ open: false, mode: "", password: "" });
+  const [showDownloadBackupModal, setShowDownloadBackupModal] = useState(false);
   const pendingImportRef = useRef(null);
   const [oidcForm, setOidcForm] = useState({
     authMode: "password",
@@ -649,15 +661,19 @@ export default function ProfilePage() {
       setSettings(data);
     } catch (err) {
       console.error("Failed to reload settings:", err);
-    }
+  }
   };
 
-  const handleExportDatabase = async (password) => {
+
+  const handleExportDatabase = async (password, selectedSections = []) => {
     setDbLoading(true);
     setDbStatus({ type: "", message: "" });
     try {
-      const res = await fetch("/api/settings/database", {
-        headers: { "x-9r-password": password },
+      const sectionsQuery = selectedSections && selectedSections.length > 0
+        ? `?sections=${selectedSections.join(",")}`
+        : "";
+      const res = await fetch(`/api/settings/database${sectionsQuery}`, {
+        headers: { "x-9r-password": password || "" },
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -678,6 +694,7 @@ export default function ProfilePage() {
       URL.revokeObjectURL(url);
 
       setDbStatus({ type: "success", message: "Database backup downloaded" });
+      setShowDownloadBackupModal(false);
     } catch (err) {
       setDbStatus({ type: "error", message: err.message || "Failed to export database" });
     } finally {
@@ -767,39 +784,41 @@ export default function ProfilePage() {
                 <p className="text-xs sm:text-sm text-text-muted font-mono break-all">~/.9router/db/data.sqlite</p>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                variant="secondary"
-                icon="download"
-                onClick={() => setDbAuth({ open: true, mode: "export", password: "" })}
-                loading={dbLoading}
-                className="w-full sm:w-auto"
-              >
-                Download Backup
-              </Button>
-              <Button
-                variant="outline"
-                icon="upload"
-                onClick={() => importFileRef.current?.click()}
-                disabled={dbLoading}
-                className="w-full sm:w-auto"
-              >
-                Import Backup
-              </Button>
-              <input
-                ref={importFileRef}
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={handleImportDatabase}
-              />
+            <div className="flex flex-col gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    variant="secondary"
+                    icon="download"
+                    onClick={() => setShowDownloadBackupModal(true)}
+                    loading={dbLoading}
+                    className="w-full sm:w-auto"
+                  >
+                    Download Backup
+                  </Button>
+                  <Button
+                    variant="outline"
+                    icon="upload"
+                    onClick={() => importFileRef.current?.click()}
+                    disabled={dbLoading}
+                    className="w-full sm:w-auto"
+                  >
+                    Import Backup
+                  </Button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleImportDatabase}
+                  />
+                </div>
+                {dbStatus.message && (
+                  <p className={`text-sm ${dbStatus.type === "error" ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
+                    {dbStatus.message}
+                  </p>
+                )}
             </div>
-            {dbStatus.message && (
-              <p className={`text-sm ${dbStatus.type === "error" ? "text-red-500" : "text-green-600 dark:text-green-400"}`}>
-                {dbStatus.message}
-              </p>
-            )}
-          </div>
+            </div>
         </Card>
 
 
@@ -816,7 +835,7 @@ export default function ProfilePage() {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm sm:text-base">Require login</p>
                 <p className="text-xs sm:text-sm text-text-muted">
-                  When ON, dashboard requires password. When OFF, access without login.
+                  Require a password for the dashboard when ON, or allow access without login when OFF.
                 </p>
               </div>
               <Toggle
@@ -1592,6 +1611,13 @@ export default function ProfilePage() {
         loading={isShuttingDown}
       />
 
+      <DownloadBackupModal
+        isOpen={showDownloadBackupModal}
+        onClose={() => setShowDownloadBackupModal(false)}
+        onDownload={(password, sections) => handleExportDatabase(password, sections)}
+        loading={dbLoading}
+      />
+
       <Modal
         isOpen={dbAuth.open}
         onClose={() => setDbAuth({ open: false, mode: "", password: "" })}
@@ -1609,7 +1635,7 @@ export default function ProfilePage() {
         }
       >
         <p className="text-text-muted mb-3 text-sm">
-          Enter your current password to {dbAuth.mode === "export" ? "export" : "import"} the database.
+          Enter your current password to {dbAuth.mode === "export" ? "export" : dbAuth.mode === "import" ? "import" : "send the database backup now"}.
         </p>
         <Input
           type="password"

@@ -18,6 +18,8 @@ function rowToKey(row) {
     rpmLimit: row.rpmLimit || 0,
     tpmLimit: row.tpmLimit || 0,
     ipWhitelist: row.ipWhitelist || "",
+    expiresAt: row.expiresAt || null,
+    systemPrompt: row.systemPrompt || "",
   };
 }
 
@@ -30,6 +32,12 @@ export async function getApiKeys() {
 export async function getApiKeyById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]);
+  return rowToKey(row);
+}
+
+export async function getApiKeyByKey(key) {
+  const db = await getAdapter();
+  const row = db.get(`SELECT * FROM apiKeys WHERE key = ?`, [key]);
   return rowToKey(row);
 }
 
@@ -54,9 +62,11 @@ export async function createApiKey(name, machineId, options = {}) {
     rpmLimit: Number(options.rpmLimit) || 0,
     tpmLimit: Number(options.tpmLimit) || 0,
     ipWhitelist: options.ipWhitelist || "",
+    expiresAt: options.expiresAt || null,
+    systemPrompt: options.systemPrompt || "",
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels, rpmLimit, tpmLimit, ipWhitelist) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, tokenLimit, usedTokens, resetInterval, lastResetAt, allowedModels, rpmLimit, tpmLimit, ipWhitelist, expiresAt, systemPrompt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -72,6 +82,8 @@ export async function createApiKey(name, machineId, options = {}) {
       apiKey.rpmLimit,
       apiKey.tpmLimit,
       apiKey.ipWhitelist,
+      apiKey.expiresAt,
+      apiKey.systemPrompt,
     ]
   );
   return apiKey;
@@ -85,7 +97,7 @@ export async function updateApiKey(id, data) {
     if (!row) return;
     const merged = { ...rowToKey(row), ...data };
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, resetInterval = ?, lastResetAt = ?, allowedModels = ?, rpmLimit = ?, tpmLimit = ?, ipWhitelist = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, resetInterval = ?, lastResetAt = ?, allowedModels = ?, rpmLimit = ?, tpmLimit = ?, ipWhitelist = ?, expiresAt = ?, systemPrompt = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -99,6 +111,8 @@ export async function updateApiKey(id, data) {
         Number(merged.rpmLimit) || 0,
         Number(merged.tpmLimit) || 0,
         merged.ipWhitelist || "",
+        merged.expiresAt || null,
+        merged.systemPrompt || "",
         id,
       ]
     );
@@ -149,6 +163,44 @@ export function recordApiKeyUsageInWindow(key, tokens = 0) {
   rateLimits[key].push({ ts: now, tokens: tokens || 0 });
 }
 
+/**
+ * Allowed-model patterns of a key, or null when the key may use every model.
+ * One definition for both the request gate and the /v1/models listing, so a key
+ * can never see a model it would be refused at request time.
+ */
+export function parseAllowedModels(allowedModels) {
+ const raw = String(allowedModels ?? "").trim();
+ if (!raw || raw === "*") return null;
+ const patterns = raw.split(",").map((model) => model.trim().toLowerCase()).filter(Boolean);
+ return patterns.length ? patterns : null;
+}
+
+/** Exact, `prefix*` and `*suffix` patterns, matched case-insensitively. */
+export function matchesAllowedModels(patterns, requestedModel) {
+ if (!patterns) return true;
+ const req = String(requestedModel || "").trim().toLowerCase();
+ if (!req) return false;
+ return patterns.some((allowed) => {
+ if (allowed === "*" || allowed === req) return true;
+ if (allowed.endsWith("*")) return req.startsWith(allowed.slice(0, -1));
+ if (allowed.startsWith("*")) return req.endsWith(allowed.slice(1));
+ return false;
+ });
+}
+
+/** Patterns of the key used by a request; null when there is no key or it allows all. */
+export async function getAllowedModelsOfKey(key) {
+ const raw = typeof key === "string" ? key.trim() : "";
+ if (!raw) return null;
+ try {
+ const db = await getAdapter();
+ const row = db.get(`SELECT allowedModels FROM apiKeys WHERE key = ?`, [raw]);
+ return row ? parseAllowedModels(row.allowedModels) : null;
+ } catch {
+ return null;
+ }
+}
+
 export async function validateApiKey(key, requestedModel = null, clientIp = null) {
   const db = await getAdapter();
   let result = false;
@@ -160,9 +212,20 @@ export async function validateApiKey(key, requestedModel = null, clientIp = null
       return;
     }
     if (row.isActive !== 1 && row.isActive !== true) {
-      result = false;
+      // Its own reason code: a switched-off key must not be confused with an unknown one.
+      result = "KEY_DISABLED";
       return;
     }
+
+    // Check expiry (#3)
+    if (row.expiresAt) {
+      const expMs = new Date(row.expiresAt).getTime();
+      if (!isNaN(expMs) && Date.now() > expMs) {
+        result = "KEY_EXPIRED";
+        return;
+      }
+    }
+
 
     // Check IP whitelist (empty = disabled/allow all)
     const ipWhitelist = (row.ipWhitelist || "").trim();
@@ -219,25 +282,9 @@ export async function validateApiKey(key, requestedModel = null, clientIp = null
     }
 
     // Check allowed models
-    if (requestedModel && allowedModels && allowedModels.trim() !== "*" && allowedModels.trim() !== "") {
-      const allowedList = allowedModels
-        .split(",")
-        .map((m) => m.trim().toLowerCase())
-        .filter(Boolean);
-
-      const req = requestedModel.toLowerCase();
-      const isAllowed = allowedList.some((allowed) => {
-        if (allowed === "*" || allowed === req) return true;
-        if (allowed.endsWith("*")) {
-          const prefix = allowed.slice(0, -1);
-          return req.startsWith(prefix);
-        }
-        if (allowed.startsWith("*")) {
-          const suffix = allowed.slice(1);
-          return req.endsWith(suffix);
-        }
-        return false;
-      });
+    const allowedPatterns = parseAllowedModels(allowedModels);
+ if (requestedModel && allowedPatterns) {
+      const isAllowed = matchesAllowedModels(allowedPatterns, requestedModel);
 
       if (!isAllowed) {
         result = "MODEL_NOT_ALLOWED";

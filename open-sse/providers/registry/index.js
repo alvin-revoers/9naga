@@ -26,6 +26,7 @@ import p23 from "./coqui.js";
 import p24 from "./cursor.js";
 import p25 from "./deepgram.js";
 import p26 from "./deepseek.js";
+import p26b from "./deepseek-web.js";
 import p27 from "./edge-tts.js";
 import p28 from "./elevenlabs.js";
 import p29 from "./exa.js";
@@ -42,7 +43,6 @@ import p39 from "./glm.js";
 import p40 from "./google-pse.js";
 import p41 from "./google-tts.js";
 import p42 from "./grok-cli.js";
-import p43 from "./grok-web.js";
 import p44 from "./groq.js";
 import p45 from "./huggingface.js";
 import p46 from "./hyperbolic.js";
@@ -71,7 +71,6 @@ import p67 from "./openai.js";
 import p68 from "./opencode-go.js";
 import p69 from "./opencode.js";
 import p70 from "./openrouter.js";
-import p71 from "./perplexity-web.js";
 import p72 from "./perplexity.js";
 import p73 from "./perplexity-agent.js";
 import p74 from "./playht.js";
@@ -123,7 +122,6 @@ import p119 from "./selfhosted-embedding.js";
 import p120 from "./fish-audio.js";
 import p121 from "./alitp-intl.js";
 import p122 from "./xquik.js";
-
 export default [
   p0,
   p1,
@@ -152,6 +150,7 @@ export default [
   p24,
   p25,
   p26,
+  p26b,
   p27,
   p28,
   p29,
@@ -168,7 +167,6 @@ export default [
   p40,
   p41,
   p42,
-  p43,
   p44,
   p45,
   p46,
@@ -197,7 +195,6 @@ export default [
   p68,
   p69,
   p70,
-  p71,
   p72,
   p73,
   p74,

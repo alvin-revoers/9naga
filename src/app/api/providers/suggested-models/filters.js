@@ -1,5 +1,5 @@
 // Free OpenCode models that don't use the "-free" id suffix
-const KNOWN_FREE_OPENCODE_MODELS = ["big-pickle"];
+const KNOWN_FREE_OPENCODE_MODELS = ["big-pickle", "union-alpha"];
 
 // Upstream returns "Model is unavailable" for this id (2026-09-02) — re-enable when fixed
 const DEAD_FREE_OPENCODE_MODELS = new Set(["deepseek-v4-flash-free"]);
@@ -26,4 +26,10 @@ export const FILTERS = {
     (Array.isArray(models) ? models : [])
       .filter((m) => m.id?.startsWith("mimo") || m.name?.toLowerCase().includes("mimo"))
       .map((m) => ({ id: m.id, name: m.name || m.id })),
+
+  "airforce-free": (models) =>
+    (Array.isArray(models) ? models : [])
+      .filter((m) => (m.tier === "free" || m.id?.endsWith(":free")) && m.supports_chat === true && (!m.media_type || m.media_type === "chat" || m.media_type === "text"))
+      .map((m) => ({ id: m.id, name: m.name || m.id, contextLength: m.context_length }))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id))),
 };

@@ -8,6 +8,7 @@ import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
+import { buildStudioTargetIndex } from "@/shared/utils/studioModelVisibility";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -19,6 +20,54 @@ const PROVIDER_ORDER = [
 
 // Providers that need no auth — always show in model selector
 const NO_AUTH_PROVIDER_IDS = Object.keys(FREE_PROVIDERS).filter(id => FREE_PROVIDERS[id].noAuth);
+
+// Providers with per-account live catalogs via /api/providers/[id]/models.
+// Static registry stays as fallback when live fetch fails or is empty.
+const LIVE_CATALOG_PROVIDERS = ["cursor", "cline", "clinepass"];
+
+// Fetch a provider's account-scoped catalog for every active connection and merge
+// the results. Entries collapse by model id on purpose: two connections of the
+// same provider produce the same picker value (`alias/id`), so keeping the first
+// avoids duplicate rows. There is no per-connection metadata to preserve beyond
+// {id,name}. Empty array means "nothing live" so callers keep the static fallback.
+function useLiveProviderModels(isOpen, connectionIds, label) {
+  const [models, setModels] = useState([]);
+  const idsKey = (connectionIds ?? []).join("|");
+
+  useEffect(() => {
+    const ids = idsKey ? idsKey.split("|") : [];
+    if (!isOpen || ids.length === 0) {
+      setModels([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    Promise.all(ids.map(async (connectionId) => {
+      const response = await fetch(`/api/providers/${connectionId}/models`, { cache: "no-store" });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return Array.isArray(data.models) ? data.models : [];
+    }))
+      .then((modelLists) => {
+        if (cancelled) return;
+        const seen = new Set();
+        setModels(modelLists.flat().filter((model) => {
+          if (!model?.id || seen.has(model.id)) return false;
+          seen.add(model.id);
+          return true;
+        }));
+      })
+      .catch((error) => {
+        // Do not hide the static fallback when the account catalog is unavailable.
+        console.warn(`Unable to load ${label} models for selector:`, error);
+        if (!cancelled) setModels([]);
+      });
+
+    return () => { cancelled = true; };
+  }, [isOpen, idsKey, label]);
+
+  return models;
+}
 
 export default function ModelSelectModal({
   isOpen,
@@ -33,6 +82,7 @@ export default function ModelSelectModal({
   capFilter = null,
   addedModelValues = [],
   closeOnSelect = true,
+  showStudioTargets = false,
 }) {
   // Filter activeProviders by serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
   const filteredActiveProviders = useMemo(() => {
@@ -49,48 +99,26 @@ export default function ModelSelectModal({
   const [providerNodes, setProviderNodes] = useState([]);
   const [customModels, setCustomModels] = useState([]);
   const [disabledModels, setDisabledModels] = useState({});
-  const [cursorModels, setCursorModels] = useState([]);
-
-  // Cursor exposes the usable catalog per account. Keep the static catalog only
-  // as a fallback, since it quickly becomes stale and different accounts can
-  // have different model entitlements.
-  const cursorConnectionIds = useMemo(
-    () => activeProviders
-      .filter((provider) => provider.provider === "cursor" && provider.id)
-      .map((provider) => provider.id),
-    [activeProviders],
-  );
-
-  useEffect(() => {
-    if (!isOpen || cursorConnectionIds.length === 0) {
-      setCursorModels([]);
-      return undefined;
+   const [studioModels, setStudioModels] = useState([]);
+  // Cursor and Cline expose the usable catalog per account, so the static catalog is
+  // kept only as a fallback: it goes stale quickly and entitlements differ per account.
+  // Single map driven by LIVE_CATALOG_PROVIDERS so the constant cannot drift
+  // from the memos below; per-provider arrays stay referentially stable unless
+  // activeProviders itself changes.
+  const liveConnectionIdsByProvider = useMemo(() => {
+    const map = Object.fromEntries(LIVE_CATALOG_PROVIDERS.map((id) => [id, []]));
+    for (const p of activeProviders) {
+      if (p?.id && Object.prototype.hasOwnProperty.call(map, p.provider)) map[p.provider].push(p.id);
     }
+    return map;
+  }, [activeProviders]);
+  const cursorConnectionIds = liveConnectionIdsByProvider.cursor;
+  const clineConnectionIds = liveConnectionIdsByProvider.cline;
+  const clinepassConnectionIds = liveConnectionIdsByProvider.clinepass;
 
-    let cancelled = false;
-    Promise.all(cursorConnectionIds.map(async (connectionId) => {
-      const response = await fetch(`/api/providers/${connectionId}/models`, { cache: "no-store" });
-      if (!response.ok) return [];
-      const data = await response.json();
-      return Array.isArray(data.models) ? data.models : [];
-    }))
-      .then((modelLists) => {
-        if (cancelled) return;
-        const seen = new Set();
-        setCursorModels(modelLists.flat().filter((model) => {
-          if (!model?.id || seen.has(model.id)) return false;
-          seen.add(model.id);
-          return true;
-        }));
-      })
-      .catch((error) => {
-        // Do not hide the static fallback when the account catalog is unavailable.
-        console.warn("Unable to load Cursor models for selector:", error);
-        if (!cancelled) setCursorModels([]);
-      });
-
-    return () => { cancelled = true; };
-  }, [isOpen, cursorConnectionIds]);
+  const cursorModels = useLiveProviderModels(isOpen, cursorConnectionIds, "Cursor");
+  const clineModels = useLiveProviderModels(isOpen, clineConnectionIds, "Cline");
+  const clinepassModels = useLiveProviderModels(isOpen, clinepassConnectionIds, "ClinePass");
 
   const fetchCombos = async () => {
     try {
@@ -154,6 +182,22 @@ export default function ModelSelectModal({
 
   useEffect(() => {
     if (isOpen) fetchDisabledModels();
+  }, [isOpen]);
+
+  const fetchStudioModels = async () => {
+    try {
+      const res = await fetch("/api/model-editor");
+      if (!res.ok) throw new Error(`Failed to fetch studio models: ${res.status}`);
+      const data = await res.json();
+      setStudioModels(data.models || []);
+    } catch (error) {
+      console.error("Error fetching model studio models:", error);
+      setStudioModels([]);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchStudioModels();
   }, [isOpen]);
 
   const allProviders = useMemo(() => ({ ...OAUTH_PROVIDERS, ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...APIKEY_PROVIDERS }), []);
@@ -323,8 +367,9 @@ export default function ModelSelectModal({
           hasModels: mergedModels.length > 0,
         };
       } else {
-        const hardcodedModels = providerId === "cursor" && cursorModels.length > 0
-          ? cursorModels
+        const liveModels = providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : [];
+        const hardcodedModels = liveModels.length > 0
+          ? liveModels
           : getModelsByProviderId(providerId);
         const hardcodedIds = new Set(hardcodedModels.map((m) => m.id));
 
@@ -393,8 +438,39 @@ export default function ModelSelectModal({
       if (group.models.length === 0) delete groups[providerId];
     });
 
+
+    // Models a studio name stands in for stay out of the picker: the studio name
+    // is the one clients should use. The model editor opts out with showStudioTargets.
+    if (!showStudioTargets) {
+      const studioTargets = buildStudioTargetIndex(studioModels);
+      Object.entries(groups).forEach(([providerId, group]) => {
+        const isCustom = isOpenAICompatibleProvider(providerId) || isAnthropicCompatibleProvider(providerId);
+        group.models = group.models.filter((m) => !studioTargets.isStudioTarget([providerId, group.alias], m.id));
+        if (group.models.length === 0) {
+          if (isCustom) {
+            // Keep custom provider visible by including its mapped studio models or a fallback entry
+            const relatedStudio = studioModels
+              .filter((sm) => sm.provider === providerId || sm.provider === group.alias)
+              .map((sm) => ({
+                id: sm.callName,
+                name: sm.displayName || sm.callName,
+                value: sm.callName,
+                isCustom: true,
+              }));
+            group.models = relatedStudio.length > 0 ? relatedStudio : [{
+              id: `__placeholder__${providerId}`,
+              name: `${group.alias || "node"}/model-id`,
+              value: `${group.alias || "node"}/model-id`,
+              isPlaceholder: true,
+            }];
+          } else {
+            delete groups[providerId];
+          }
+        }
+      });
+    }
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels, clineModels, clinepassModels, studioModels, showStudioTargets]);
 
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
@@ -403,6 +479,18 @@ export default function ModelSelectModal({
     const query = searchQuery.toLowerCase();
     return combos.filter(c => c.name.toLowerCase().includes(query));
   }, [combos, searchQuery, kindFilter]);
+
+  // Studio models are LLM-only user-defined names, so they hide for typed kinds.
+  const filteredStudioModels = useMemo(() => {
+    if (kindFilter || capFilter) return [];
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return studioModels;
+    return studioModels.filter((m) =>
+      m.callName.toLowerCase().includes(query) ||
+      (m.displayName || "").toLowerCase().includes(query) ||
+      m.targetModel.toLowerCase().includes(query)
+    );
+  }, [studioModels, searchQuery, kindFilter, capFilter]);
 
   // Sort models alphabetically, with added models floated to top
   const sortModels = (models) => {
@@ -472,7 +560,7 @@ export default function ModelSelectModal({
       {/* Info bar */}
       <div className="flex items-center gap-2 mb-3 px-2.5 py-2 bg-primary/8 border border-primary/20 rounded-lg text-xs text-text-muted">
         <span className="material-symbols-outlined text-primary shrink-0" style={{ fontSize: "14px" }}>info</span>
-        <span>Click to add, click again to remove. Changes are saved automatically.</span>
+        <span>Click a model to add it, click again to remove it, and the change is saved automatically.</span>
       </div>
 
       {/* Search - compact */}
@@ -522,6 +610,44 @@ export default function ModelSelectModal({
                       <span className="material-symbols-outlined leading-none" style={{ fontSize: "10px" }}>check</span>
                     )}
                     {combo.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Custom model section */}
+        {filteredStudioModels.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
+              <span className="material-symbols-outlined size-[14px] text-[14px] leading-none text-primary">auto_awesome</span>
+              <span className="text-xs font-medium leading-none text-primary">Custom Models</span>
+              <span className="text-[10px] text-text-muted">({filteredStudioModels.length})</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {filteredStudioModels.map((studio) => {
+                const isSelected = selectedModel === studio.callName;
+                return (
+                  <button
+                    key={studio.callName}
+                    onClick={() => handleSelect({ id: studio.callName, name: studio.displayName || studio.callName, value: studio.callName })}
+                    title={`Calls ${studio.targetLabel || studio.targetModel}`}
+                    className={`
+                      px-2 py-1 rounded-xl text-xs font-medium transition-all border hover:cursor-pointer flex items-center gap-1
+                      ${isSelected
+                        ? "bg-primary text-white border-primary"
+                        : addedModelValues.includes(studio.callName)
+                          ? "bg-primary border-primary text-white hover:bg-primary-hover"
+                          : "bg-surface border-border text-text-main hover:border-primary/50 hover:bg-primary/5"
+                      }
+                    `}
+                  >
+                    {addedModelValues.includes(studio.callName) && (
+                      <span className="material-symbols-outlined leading-none" style={{ fontSize: "10px" }}>check</span>
+                    )}
+                    {studio.callName}
+                    <span className="text-[9px] opacity-60 font-normal">custom</span>
                   </button>
                 );
               })}
@@ -628,4 +754,5 @@ ModelSelectModal.propTypes = {
   kindFilter: PropTypes.string,
   addedModelValues: PropTypes.arrayOf(PropTypes.string),
   closeOnSelect: PropTypes.bool,
+  showStudioTargets: PropTypes.bool,
 };
