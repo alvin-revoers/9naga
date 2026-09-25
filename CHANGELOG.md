@@ -1,7 +1,43 @@
-# v0.5.107-Custom (2026-09-19)
+# v0.5.113-Custom (2026-09-23)
 
 ## Custom Features & Enhancements
-- **Auto Update restored**: the sidebar "Update now" button calls the real updater endpoint again. The detached updater installs the new version, restarts 9Router and reopens the dashboard on its own, with live progress (phase and installer log tail) shown in the overlay while the server is down. If the updater is unavailable, for example in a dev build, the flow falls back to the existing copy-command panel so there is always a working path. Failed installs surface the installer log with a reload button instead of a silent hang.
+- **Gemini Web (Cookie) provider**: added `gemini-web` under Web Cookie Providers, next to the existing DeepSeek entry. Paste `__Secure-1PSID` (plus `__Secure-1PSIDTS`) from gemini.google.com cookies; the cookie is verified against the live session page before saving. Requests run over plain HTTP to the internal StreamGenerate endpoint, no browser needed, with multi-turn history folded into one prompt.
+- **Kimi Web (Cookie) provider**: added `kimi-web` under Web Cookie Providers. Paste `access_token` from www.kimi.ai localStorage; validation probes the account endpoint before saving. Requests speak the Connect-RPC chat protocol with automatic refresh_token exchange on 401, reasoning deltas surfaced as `reasoning_content`, and models Kimi K3 plus Kimi K2.6.
+- **Web RAG backends stay honest about tools**: both new cookie providers reject OpenAI function tools with a clear 400 instead of answering empty, since the web backends are text-only endpoints with no native tool channel.
+
+# v0.5.112-Custom (2026-09-23)
+
+## Sync with upstream v0.5.86
+- **Merged upstream through v0.5.86 (2026-09-23)**: Xiaomi MiMo server-assisted desktop login with five account clusters and v2.6 models, Claude Opus 5.5 support, and proxy pool header forwarding fix.
+- **Kept fork behaviour**: Union Alpha routing over Messages API, one-click auto backup scheduler, Speed Mode plugin, per-key usage page, plugin badges on Custom Models and combos, 9Router Settings label, and the fork README. The OpenCode free-tier fix is carried by upstream's `opencodeFingerprint` helper, with `union-alpha-free` kept alongside it.
+
+# v0.5.111-Custom (2026-09-22)
+
+## Sync with upstream v0.5.85
+- **Merged upstream through v0.5.85 (2026-09-22)**: OpenCode Zen provider with free-tier fingerprint, Jev System One endpoint wired into the sidebar and media providers, Qoder CN provider, Cursor/Claude combo presets with bulk operations, analytics Requests mode with provider/model breakdown charts, All Time usage period, capability metadata on `/v1/models`, and all upstream fixes (Claude refusal mapping, Antigravity quotas, Qoder replay guard, Hugging Face router migration, multi-platform Docker).
+- **Kept fork behaviour**: Union Alpha routing over Messages API, one-click auto backup scheduler, Speed Mode plugin, per-key usage page, plugin badges on Custom Models and combos, 9Router Settings label, and the fork README. The OpenCode free-tier fix is now carried by upstream's `opencodeFingerprint` helper instead of the fork's local cloak, with `union-alpha-free` kept alongside it.
+
+# v0.5.110-Custom (2026-09-20)
+
+## Custom Features & Enhancements
+- **API Key Usage page**: a new dashboard page under Usage that shows one card per generated key. Each card carries a quota progress bar (used versus limit, amber past 80 percent, red when exhausted), the next reset time computed from the key's interval and anchor, request, token and cost totals aggregated from the usage history, the error rate, rate-limit settings, expiry state, and an expandable per-model breakdown of the key's most used models. An auto-refresh toggle re-polls every ten seconds, and usage left behind by deleted keys is grouped into a single "Deleted keys" card so history is never lost.
+
+# v0.5.109-Custom (2026-09-20)
+
+## Fixes
+- **Plugin badges on Custom Models and Combos**: the Custom Plugins badges (Image Vision, Think Deeper, Speed Mode, Uncensored Output) only ever resolved against plain provider models, so a plugin applied to a Custom Model, a custom-provider import, or a combo showed its badge nowhere. The models endpoint now emits capability entries for Custom Models (inherited from their target plus the plugin badges matched against the studio name or the model it calls) and for combos (boolean capabilities OR-ed across members, context/output floors taken from the smallest member). The model picker and capability hook resolve those entries by callable name, and the picker now renders the same badges on Custom Model and combo chips that it already showed on regular models.
+
+# v0.5.108-Custom (2026-09-20)
+
+## Fixes
+- **Automatic Backup actually fires**: the scheduler previously only armed through the deferred app bootstrap, so on a restarted server the timer could stay dead until the settings page was opened; the HTTP server wrapper now arms it at boot and the config endpoint wakes it on demand as a second safety net, so a pending schedule can never silently disappear.
+- **Import Backup no longer resets the schedule**: restoring a backup without an autoBackup section (old or partial exports) kept wiping the stored config and status, which disabled backups on its own. The autoBackup scope is now only touched when the imported file actually carries it, and the import handler re-arms the scheduler against the freshly stored config afterwards.
+- **Honest next-run countdown**: with the scheduler idle the endpoint clamped the due time to "now", which rendered a stuck 00:00 countdown. It now reports the real scheduled time even when the run is overdue, and the woken scheduler takes over the countdown from there.
+
+# v0.5.107-Custom (2026-09-20)
+
+## Custom Features & Enhancements
+- **Automatic Backup restored**: brought back the scheduled backup feature with its full settings dialog on the 9Router Settings page. Configure a Telegram bot (bot token plus numeric owner chat id) or a GitHub token and repository, pick an interval (24 hours, 7 days, 30 days, or custom), then save. The scheduler sends the backup file automatically on the chosen interval, a live countdown shows when the next backup fires, and Send Test Backup runs a one-off backup through the password dialog. The export/import plumbing was re-integrated on top of the current selective backup system: Automatic Backup now exports all sections, and old partial or full backups remain fully import-compatible.
 
 # v0.5.106-Custom (2026-09-19)
 
@@ -306,6 +342,38 @@
 - **UI & Theme Sync**: the app is locked to dark mode with theme and language switchers removed, and custom select dropdowns now follow the app theme.
 
 # v0.5.100 (2026-09-18)
+# v0.5.86 (2026-09-23)
+
+## Features
+- **Xiaomi MiMo**: server-assisted desktop login for headless/Docker deployments, five account clusters (cn/sgp/ams/ru/in), and v2.6 pro/flash/pro-ultraspeed models with dual-route (account service vs. cloud API)
+- **Claude**: add Claude Opus 5.5 support
+- **i18n**: translate React text rewrites via characterData mutation observer
+
+## Fixes
+- **Proxy Pools**: keep request headers intact through Vercel/Cloudflare/Deno relays (spreading a `Headers` instance yielded `{}`, dropping auth and content-type)
+- **Xiaomi MiMo login**: keep the session in the httpOnly cookie only, require dashboard auth on the proxy branch, and stop forwarding authorization headers upstream
+
+# v0.5.85 (2026-09-22)
+
+## Features
+- **System One**: add `/v1/systemone` decision endpoint for Jev models (OpenCode Zen and OpenRouter lanes), wire into sidebar and Media Providers page with interactive probe testing
+- **CLI Tools**: add dynamic configuration, settings APIs, and official logos for Pi, OMP, Crush, ForgeCode, Smelt, and CodeWhale
+- **Analytics & Usage**: add Requests mode, provider/model breakdown charts, All Time period filter, and refined overview cards
+- **Combos**: add Cursor/Claude Default presets; support bulk select/delete and bulk strategy changes (Fallback / Round Robin / Fusion)
+- **Model Capabilities**: expose model capability metadata on `/v1/models` and aggregate capabilities across combo targets
+- **OpenCode Zen & MiMo**: add OpenCode Zen (`opencode-zen`) provider with free-tier fingerprint; switch default vision fallback to MiMo V2.6 Flash Free
+- **Qoder CN**: add `qoder-cn` provider for qoder.com.cn with OAuth flow, COSY protocol, and CN gateway routing
+
+## Fixes
+- **Translator**: map Claude `refusal` stop_reason to `content_filter` and surface explanation; strip replayed reasoning fields for Groq, Mistral, and Cerebras (#4220)
+- **Antigravity**: drop requestType `agent` to avoid false 429 `RESOURCE_EXHAUSTED`; separate weekly and short-window (5-hour) quotas and deduplicate dashboard rows
+- **Responses API**: report usage on `response.completed` so clients can auto-compact (#3432)
+- **Hugging Face**: migrate to Inference Providers router (`router.huggingface.co`), expand image models catalog, and add STT route
+- **Qoder**: prevent signed request replay (`403/103 Duplicate request`), handle code 110 billing blocks, and preserve upstream SSE error status
+- **Performance**: bound usage `lastUsed` scan to a 2-day window; map large budget tokens to `max` reasoning tier
+- **Docker**: publish verified multi-platform images (linux/amd64 and linux/arm64) with configurable apk build mirrors
+
+# v0.5.81 (2026-09-18)
 
 ## Features
 - **Xiaomi MiMo**: merge MiMo Desktop support into `xiaomi-mimo` with dual auth (API key + Desktop/OAuth session), Preview models support, and encrypted-callback OAuth flow
@@ -314,6 +382,8 @@
 - **i18n**: integrate Persian (fa) translation
 
 ## Fixes
+- **Cursor**: stop AgentService empty turns (`OUT 0`) and silent hangs — fold system prompts instead of `custom_system_prompt`, send `ModelDetails`, read Composer/Grok `thinking_delta`, ack request-context without echoing MCP tools, and reject IDE execs so the model can continue
+- **RTK**: for Cursor, compress source-format `tool_result` / `role:tool` **before** translation — its translator rewrites those shapes, so post-translate compression missed them. Other providers keep the post-translate pass unchanged
 - **OpenCode / OpenCode Go**: resolve 403 `FreeTierError` and 429 rate limits with canonical session format, valid User-Agent, and stable upstream session reuse; force stream and declare `forceStream` for free-tier SSE aggregation; cloak decoy tools, normalize Muse Free tool choice, and strip prior reasoning items on Responses models; route Union Alpha via Messages API
 - **Kiro**: preserve underscores in tool names (`mcp__server__tool`) and restore client tool names in responses; use neutral placeholder for tool-result-only turns; forward tool-result images
 - **Stream**: report aborts after HTTP 200 in-band (per-format error frames) instead of closing silently
